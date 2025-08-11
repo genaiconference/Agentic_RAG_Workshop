@@ -38,15 +38,22 @@ def append_custom_metadata(docs):
     return docs
 
 
-def generate_parents(md_result, full_text_with_images, llm):
+def add_source_metadata(docs, source_file_name):
+  for doc in docs:
+    doc.metadata['source'] = source_file_name
+  return docs
+
+
+def generate_parents(md_result, full_text_with_images, source_file_name, llm):
     """Generate parent document chunks and metadata."""
-    print("[INFO] Creating parent documents...")
-    parent_docs, used_headers = create_chunks(md_result, full_text_with_images, llm)
+    parent_docs = create_chunks(md_result, full_text_with_images, llm)
 
     for doc in parent_docs:
         create_custom_metadata_for_all_sources(doc)
-
+    
+    parent_docs = add_source_metadata(parent_docs, source_file_name)
     final_parents = append_custom_metadata(parent_docs)
+
     print(f"[INFO] Created {len(final_parents)} parent documents.")
     return final_parents
 
@@ -152,7 +159,7 @@ def paragraphs_with_page_numbers(result):
     return paragraph_positions
 
 
-def create_chunks(result, result_with_image_descp, llm):  #-------> current approach
+def create_chunks(result, result_with_image_descp, llm):
     # Initialize the MarkdownHeaderTextSplitter with custom headers
     parent_headers_to_split_on = [
         ("#", "Header 1"),
@@ -209,5 +216,5 @@ def create_chunks(result, result_with_image_descp, llm):  #-------> current appr
             chunk.metadata['page_number'] = None
 
         md_header_splits.append(chunk)
-    return md_header_splits , final_result['headers_used']
+    return md_header_splits
     
