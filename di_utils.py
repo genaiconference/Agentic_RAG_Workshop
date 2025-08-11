@@ -2,14 +2,7 @@ import base64
 import logging
 import mimetypes
 import os
-import pickle
 from mimetypes import guess_type
-import ast
-import re
-import tiktoken
-from rapidfuzz import fuzz
-from collections import defaultdict, Counter
-from langchain_text_splitters import MarkdownHeaderTextSplitter
 import fitz
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import DocumentAnalysisFeature
@@ -18,8 +11,6 @@ from azure.core.pipeline.transport import RequestsTransport
 from langchain.docstore.document import Document
 from langchain.schema.messages import AIMessage, HumanMessage
 from PIL import Image
-
-logger = logging.getLogger(__name__)
 
 
 def crop_image_from_image(image_path, page_number, bounding_box):
@@ -178,7 +169,7 @@ def understand_image_with_gptv(file, llm):
     return interpretation
 
 
-def analyze_layout(
+def analyze_document_layout(
     input_file_path: str, doc_intelligence_endpoint: str, doc_intelligence_key: str
 ):
     """
@@ -219,16 +210,16 @@ def process_images(input_file_path, output_folder, result, llm):
     image_chunks_list = []
 
     if result.figures:
-        logger.debug("starting up...")
+        print("starting up...")
         for idx, figure in enumerate(result.figures):
             if figure["boundingRegions"]:
-                logger.debug("entered...")
+                print("entered...")
                 caption_region = figure["boundingRegions"]
                 caption_content = figure.caption.content if figure.caption else ""
-                logger.debug(f"\tCaption: {caption_content}")
+                print(f"\tCaption: {caption_content}")
 
                 for region in figure["boundingRegions"]:
-                    logger.debug("page numer:", region.page_number)
+                    print("page numer:", region.page_number)
 
                     if region in caption_region:
                         boundingbox = (
@@ -237,11 +228,11 @@ def process_images(input_file_path, output_folder, result, llm):
                             region.polygon[4],  # x1 (right)
                             region.polygon[5],  # y1 (bottom)
                         )
-                        logger.debug(boundingbox)
+                        #print(boundingbox)
                         cropped_image = crop_image_from_file(
                             input_file_path, region.page_number - 1, boundingbox
                         )  # page_number is 1-indexed
-                        logger.debug("image cropped")
+                        print("image cropped")
                         # Get the base name of the file
                         base_name = os.path.basename(input_file_path)
 
@@ -256,7 +247,7 @@ def process_images(input_file_path, output_folder, result, llm):
                             os.mkdir(output_folder)
                         cropped_image_filename = output_folder + output_file
                         cropped_image.save(cropped_image_filename)
-                        logger.info("image saved as" + cropped_image_filename)
+                        print("image saved as" + cropped_image_filename)
 
                         img_description = understand_image_with_gptv(
                             cropped_image_filename, llm
@@ -277,202 +268,6 @@ def process_images(input_file_path, output_folder, result, llm):
                             )
                             image_chunks_list.append(image_chunk)
     return image_chunks_list
-
-
-def count_tokens(text_content):
-    # Load the tokenizer for a specific model (e.g., GPT-4)
-    encoding = tiktoken.encoding_for_model("gpt-4")
-
-    # Encode the content to tokenize it
-    tokens = encoding.encode(text_content)
-
-    # Output the number of tokens
-    #print(f"Number of tokens: {len(tokens)}")
-    return len(tokens)
-  
-
-def clean_text(text):
-    # Handle escaped newlines and bullets
-    text = text.replace('\\n', ' ')
-    text = text.replace('\n', ' ')
-    text = re.sub(r'(\d+)\\\.', r'\1.', text)
-    text = text.replace('\\', '')
-
-    # Normalize LaTeX-style formulas: $C H _ { 4 }$ → ch4
-    text = re.sub(r'\$([^$]+)\$', normalize_latex_formula, text)
-
-    # Collapse multiple spaces
-    text = re.sub(r'\s+', ' ', text)
-    return text.strip()
-
-def normalize_latex_formula(match):
-    """
-    Clean LaTeX-style inline formula like $C H _ { 4 }$ → ch4
-    """
-    formula = match.group(1)
-    # Remove spaces and LaTeX formatting
-    formula = formula.replace(' ', '')
-    formula = re.sub(r'_?\{?(\d+)\}?', r'\1', formula)  # remove _{4} → 4
-    return formula.lower()
-
-def create_chunks_new_v3(result,result_with_image_descp, llm):  #-------> current approach
-    # Initialize the MarkdownHeaderTextSplitter with custom headers
-    parent_headers_to_split_on = [
-        ("#", "Header 1"),
-        ("##", "Header 2")
-    ]
-
-    final_result = dynamic_markdown_split(
-    content=result_with_image_descp,
-    initial_headers=parent_headers_to_split_on #<should get it from pipeline.xlsx>
-)
-
-    page_splits = final_result['chunks']
-    md_header_splits = []
-    paragraph_positions = paragraphs_with_page_numbers(result)
-
-    for chunk in page_splits:
-        chunk_text_cleaned = clean_text(chunk.page_content).lower()
-        page_weight_scores = defaultdict(float)
-
-        # Exact matching
-        for paragraph_text, page_numbers in paragraph_positions.items():
-            if paragraph_text in chunk_text_cleaned:
-                para_len = len(paragraph_text)
-                chunk_len = len(chunk_text_cleaned)
-
-                if chunk_len == 0:
-                    continue
-
-                # Compute weight as ratio of paragraph to chunk
-                weight = para_len / chunk_len
-
-                for page in page_numbers:
-                    page_weight_scores[page] += weight
-
-        # If no exact matches, try fuzzy matching with weight
-        if not page_weight_scores:
-            for paragraph_text, page_numbers in paragraph_positions.items():
-                score = fuzz.partial_ratio(paragraph_text, chunk_text_cleaned)
-                if score > 90:
-                    para_len = len(paragraph_text)
-                    chunk_len = len(chunk_text_cleaned)
-
-                    if chunk_len == 0:
-                        continue
-
-                    weight = (score / 100) * (para_len / chunk_len)
-
-                    for page in page_numbers:
-                        page_weight_scores[page] += weight
-
-        # Assign majority page number
-        if page_weight_scores:
-            # Pick the page with the highest weighted score
-            majority_page = max(page_weight_scores.items(), key=lambda x: x[1])[0]
-            chunk.metadata['page_number'] = majority_page
-        else:
-            chunk.metadata['page_number'] = None
-
-        md_header_splits.append(chunk)
-    return md_header_splits , final_result['headers_used']
-
-def dynamic_markdown_split(content, initial_headers, token_limit=3000):
-    current_config = initial_headers.copy()
-    max_header_level = 4  # Maximum allowed markdown header depth (######)
-
-    while True:
-        # Create splitter with current configuration
-        splitter = MarkdownHeaderTextSplitter(
-            headers_to_split_on=current_config,
-            strip_headers=True
-        )
-
-        # Split the document
-        split_docs = splitter.split_text(content)
-
-        # Check if all chunks meet token requirements
-        if all(count_tokens(doc.page_content) <= token_limit for doc in split_docs):
-            return {
-                'chunks': split_docs,
-                'headers_used': current_config,
-                'status': 'success'
-            }
-
-        # Exit if we've reached maximum header depth
-        if not current_config or len(current_config[-1][0]) >= max_header_level:
-            return {
-                'chunks': split_docs,
-                'headers_used': current_config,
-                'status': 'warning: could not meet token limit'
-            }
-
-        # Generate next header level (add one more '#' to the last header)
-        last_header_symbol, last_header_name = current_config[-1]
-        next_level = len(last_header_symbol) + 1
-        current_config = current_config.copy() + [
-            ('#' * next_level, f'Header_{next_level}')
-        ]
-
-def is_mostly_numbers(text):
-    # Remove normal punctuations and spaces
-    cleaned = re.sub(r'[\s.,()\[\]{}\-–—]', '', text)
-    # If after cleaning, it's only digits, return True
-    return cleaned.isdigit()
-
-
-def is_single_word(text):
-    # Split the text into words
-    words = text.strip().split()
-    # Check if there's only one word
-    return len(words) == 1
-
-
-def paragraphs_with_page_numbers(result):
-    paragraph_positions = defaultdict(list)
-
-    for paragraph in result.paragraphs:
-        if not hasattr(paragraph, 'role') or not paragraph.role:  # role missing
-            paragraph_text = clean_text(paragraph.content).lower()
-            if paragraph_text and not is_mostly_numbers(paragraph_text) and not is_single_word(paragraph_text):
-                paragraph_positions[paragraph_text].append(paragraph.bounding_regions[0]["pageNumber"])
-
-    return paragraph_positions
-
-
-def create_custom_metadata_for_all_sources(item):  
-   # item.metadata['source'] = source  
-      
-    headers = ['Header 4', 'Header 3', 'Header 2', 'Header 1']  
-      
-    # Find the first existing header in reverse order  
-    for header in headers: 
-        if header in item.metadata:  
-            item.metadata['custom_metadata'] = item.metadata[header]
-            print('')
-            break  
-      
-    return item 
-
-
-def append_custom_metadata(docs):
-    """
-    Appends custom metadata to the beginning of the page content for each document in the list.
-    Args:
-        docs (list): A list of documents with custom metadata in their metadata dictionaries.
-    Returns:
-        list: A list of documents with updated page content.
-    """
-    for doc in docs:
-        if "custom_metadata" in doc.metadata:
-          if doc.metadata['custom_metadata'] == doc.metadata['Header 1']:
-            doc.page_content = "#" + doc.metadata['custom_metadata'] + "\n\n" + doc.page_content
-          elif doc.metadata['custom_metadata'] == doc.metadata['Header 2']:
-            doc.page_content = "##" + doc.metadata['custom_metadata'] + "\n\n " + doc.page_content
-          else:
-            doc.page_content = doc.metadata['custom_metadata'] + "\n\n" + doc.page_content
-
-    return docs
 
 
 def insert_figures_into_full_text(span_map: list, result, image_chunks: list):
@@ -511,18 +306,7 @@ def insert_figures_into_full_text(span_map: list, result, image_chunks: list):
           + f"\n{fig_description}\n"
           + inserted_text[insert_at:]
       )
-
   return inserted_text
-
-
-
-def analyze_document(input_path, key, endpoint):
-    """Analyze document layout using DI service."""
-    return analyze_layout(
-        input_path,
-        doc_intelligence_key=key,
-        doc_intelligence_endpoint=endpoint,
-    )
 
 
 def extract_span_map(md_result):
@@ -533,24 +317,3 @@ def extract_span_map(md_result):
         for page in pages
         for word in page.get("words", [])
     ]
-
-
-def save_pickle(data, path):
-    """Save data to a pickle file."""
-    with open(path, "wb") as f:
-        pickle.dump(data, f)
-    print(f"[INFO] Pickle saved to {path}")
-
-
-def generate_parents(md_result, full_text_with_images, llm):
-    """Generate parent document chunks and metadata."""
-    print("[INFO] Creating parent documents...")
-    parent_docs, used_headers = create_chunks_new_v3(md_result, full_text_with_images, llm)
-
-    for doc in parent_docs:
-        create_custom_metadata_for_all_sources(doc)
-
-    final_parents = append_custom_metadata(parent_docs)
-    print(f"[INFO] Created {len(final_parents)} parent documents.")
-    return final_parents
-

@@ -1,7 +1,7 @@
 azure-ai-documentintelligence==1.0.2
 pandas==2.2.2
 pathlib==1.0.1
-fitz==0.0.1.dev2
+pymupdf
 tools==1.0.2
 python-dotenv==1.1.1
 langchain_openai==0.3.28
