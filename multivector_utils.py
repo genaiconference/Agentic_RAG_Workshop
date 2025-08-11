@@ -7,6 +7,8 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
+from langchain.retrievers.multi_vector import MultiVectorRetriever
+from langchain.storage import InMemoryByteStore
 
 
 def create_child_documents(parent_docs: List[Document], doc_ids: List[str], id_key: str) -> List[Document]:
@@ -80,3 +82,21 @@ def generate_hypothetical_questions(parent_docs: List[Document], id_key: str, do
             [Document(page_content=q, metadata={id_key: doc_ids[i]}) for q in question_list]
         )
     return question_docs
+
+
+def create_MVR(parent_docs, doc_ids, vectorstore):
+    """
+    Create MultiVectorRetriever
+    """
+    # The storage layer for the parent documents
+    store = InMemoryByteStore()
+    id_key = "doc_id"
+
+    # The retriever (empty to start)
+    retriever = MultiVectorRetriever(
+        vectorstore=vectorstore,
+        byte_store=store,
+        id_key=id_key,
+    )
+    retriever.docstore.mset(list(zip(doc_ids, parent_docs)))
+    return retriever
