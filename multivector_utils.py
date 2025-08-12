@@ -7,9 +7,45 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
+from langchain_chroma import Chroma
 from langchain.retrievers.multi_vector import MultiVectorRetriever
 from langchain.storage import InMemoryByteStore
-from CustomMVR import customMVR
+import chunking_utils
+
+
+def create_parent_docs(content, llm):
+    # Initialize the MarkdownHeaderTextSplitter with custom headers
+    parent_headers_to_split_on = [
+        ("#", "Header 1"),
+        ("##", "Header 2")
+    ]
+
+    # Create splitter with current configuration
+    splitter = MarkdownHeaderTextSplitter(
+        headers_to_split_on=parent_headers_to_split_on,
+        strip_headers=True
+    )
+
+    # Split the document
+    split_docs = splitter.split_text(content)
+    return split_docs
+
+
+def generate_final_parents(md_result, full_text_with_images, source_file_name, llm):
+    """Generate parent document chunks and metadata."""
+    parent_docs = create_parent_docs(md_result, full_text_with_images, llm)
+
+    parent_docs = chunking_utils.assign_page_numbers_to_parent_docs(md_result, parent_docs)
+
+    for doc in parent_docs:
+        chunking_utils.create_custom_metadata_for_all_sources(doc)
+    
+    parent_docs = chunking_utils.add_source_metadata(parent_docs, source_file_name)
+    final_parents = chunking_utils.append_custom_metadata(parent_docs)
+
+    print(f"[INFO] Created {len(final_parents)} parent documents.")
+    return final_parents
+
 
 
 def create_child_documents(parent_docs: List[Document], doc_ids: List[str], id_key: str) -> List[Document]:
@@ -85,6 +121,21 @@ def generate_hypothetical_questions(parent_docs: List[Document], id_key: str, do
     return question_docs
 
 
+def create_chroma_vectordb(embeddings, vector_db_name, sub_docs, summary_docs, question_docs):
+    persist_directory = os.path.join(os.getcwd(), vector_db_name)
+
+    # The vectorstore to use to index the child chunks (creating an empty vectorstore for now)
+    vector_store = Chroma(
+        collection_name="documents",
+        embedding_function=embeddings,
+        persist_directory=persist_directory,
+    )
+
+    vector_store.add_documents(sub_docs)
+    vector_store.add_documents(summary_docs)
+    vector_store.add_documents(question_docs)
+    return
+
 def create_MVR(parent_docs, doc_ids, vectorstore, filter_expression):
     """
     Create MultiVectorRetriever
@@ -94,11 +145,11 @@ def create_MVR(parent_docs, doc_ids, vectorstore, filter_expression):
     id_key = "doc_id"
 
     # The Custom retriever (empty to start)
-    retriever = customMVR(
+    retriever = MultiVectorRetriever(
         vectorstore=vectorstore,
         byte_store=store,
         id_key=id_key,search_kwargs={"k": 5},
-        filter_condition=filter_expression
+
     )
     retriever.docstore.mset(list(zip(doc_ids, parent_docs)))
     return retriever
