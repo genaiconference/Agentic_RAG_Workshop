@@ -9,6 +9,7 @@ from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
 from langchain.retrievers.multi_vector import MultiVectorRetriever
 from langchain.storage import InMemoryByteStore
+from CustomMVR import customMVR
 
 
 def create_child_documents(parent_docs: List[Document], doc_ids: List[str], id_key: str) -> List[Document]:
@@ -84,7 +85,7 @@ def generate_hypothetical_questions(parent_docs: List[Document], id_key: str, do
     return question_docs
 
 
-def create_MVR(parent_docs, doc_ids, vectorstore):
+def create_MVR(parent_docs, doc_ids, vectorstore, filter_expression):
     """
     Create MultiVectorRetriever
     """
@@ -92,11 +93,12 @@ def create_MVR(parent_docs, doc_ids, vectorstore):
     store = InMemoryByteStore()
     id_key = "doc_id"
 
-    # The retriever (empty to start)
-    retriever = MultiVectorRetriever(
+    # The Custom retriever (empty to start)
+    retriever = customMVR(
         vectorstore=vectorstore,
         byte_store=store,
-        id_key=id_key,
+        id_key=id_key,search_kwargs={"k": 5},
+        filter_condition=filter_expression
     )
     retriever.docstore.mset(list(zip(doc_ids, parent_docs)))
     return retriever
