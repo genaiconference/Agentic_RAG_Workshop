@@ -12,4 +12,6 @@ azure-identity==1.24.0
 azure-search-documents==11.5.3
 dotenv
 langchain_tavily==0.2.11
+langgraph==0.6.4
 langgraph-checkpoint-sqlite==2.0.11
+simple-colors==0.1.5
