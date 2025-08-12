@@ -43,7 +43,7 @@ def crop_image_from_pdf_page(pdf_path, page_number, bounding_box):
     :param bounding_box: A tuple of (x0, y0, x1, y1) coordinates for the bounding box.
     :return: A PIL Image of the cropped area.
     """
-    logger.info("Opening PDF file: %s", pdf_path)
+    print("Opening PDF file: %s", pdf_path)
 
     doc = fitz.open(pdf_path)
     page = doc.load_page(page_number)
@@ -245,7 +245,7 @@ def process_images(input_file_path, output_folder, result, llm):
 
                         if not os.path.exists(output_folder):
                             os.mkdir(output_folder)
-                        cropped_image_filename = output_folder + output_file
+                        cropped_image_filename = output_folder + "/" + output_file
                         cropped_image.save(cropped_image_filename)
                         print("image saved as" + cropped_image_filename)
 
