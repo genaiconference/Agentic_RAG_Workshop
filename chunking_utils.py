@@ -44,58 +44,6 @@ def add_source_metadata(docs, source_file_name):
   return docs
 
 
-def generate_parents(md_result, full_text_with_images, source_file_name, llm):
-    """Generate parent document chunks and metadata."""
-    parent_docs = create_chunks(md_result, full_text_with_images, llm)
-
-    for doc in parent_docs:
-        create_custom_metadata_for_all_sources(doc)
-    
-    parent_docs = add_source_metadata(parent_docs, source_file_name)
-    final_parents = append_custom_metadata(parent_docs)
-
-    print(f"[INFO] Created {len(final_parents)} parent documents.")
-    return final_parents
-
-
-def dynamic_markdown_split(content, initial_headers, token_limit=3000):
-    current_config = initial_headers.copy()
-    max_header_level = 4  # Maximum allowed markdown header depth (######)
-
-    while True:
-        # Create splitter with current configuration
-        splitter = MarkdownHeaderTextSplitter(
-            headers_to_split_on=current_config,
-            strip_headers=True
-        )
-
-        # Split the document
-        split_docs = splitter.split_text(content)
-
-        # Check if all chunks meet token requirements
-        if all(count_tokens(doc.page_content) <= token_limit for doc in split_docs):
-            return {
-                'chunks': split_docs,
-                'headers_used': current_config,
-                'status': 'success'
-            }
-
-        # Exit if we've reached maximum header depth
-        if not current_config or len(current_config[-1][0]) >= max_header_level:
-            return {
-                'chunks': split_docs,
-                'headers_used': current_config,
-                'status': 'warning: could not meet token limit'
-            }
-
-        # Generate next header level (add one more '#' to the last header)
-        last_header_symbol, last_header_name = current_config[-1]
-        next_level = len(last_header_symbol) + 1
-        current_config = current_config.copy() + [
-            ('#' * next_level, f'Header_{next_level}')
-        ]
-
-
 def count_tokens(text_content):
     # Load the tokenizer for a specific model (e.g., GPT-4)
     encoding = tiktoken.encoding_for_model("gpt-4")
@@ -159,19 +107,15 @@ def paragraphs_with_page_numbers(result):
     return paragraph_positions
 
 
-def create_chunks(result, result_with_image_descp, llm):
-    # Initialize the MarkdownHeaderTextSplitter with custom headers
-    parent_headers_to_split_on = [
-        ("#", "Header 1"),
-        ("##", "Header 2")
-    ]
-    final_result = dynamic_markdown_split(content=result_with_image_descp,
-    initial_headers=parent_headers_to_split_on
-    )
-    page_splits = final_result['chunks']
-    md_header_splits = []
-    paragraph_positions = paragraphs_with_page_numbers(result)
 
+def assign_page_numbers_to_parent_docs(md_result, page_splits):
+    """
+    This function does assign page numbers to each parent chunk.
+    Using DI there is no direct way to get page numbers.
+    Below is the custom logic to find out right pagenumber to each chunk and add it as metadata
+    """
+    md_header_splits = []
+    paragraph_positions = paragraphs_with_page_numbers(md_result)
     for chunk in page_splits:
         chunk_text_cleaned = clean_text(chunk.page_content).lower()
         page_weight_scores = defaultdict(float)
