@@ -13,6 +13,43 @@ from langchain.storage import InMemoryByteStore
 import chunking_utils
 
 
+def dump_pickle_file(retriever, filename: str):
+    """
+    Serialize and save the given data to a file using Pickle.
+    Args:
+        data: The data to be pickled.
+        filename (str): The name of the file where the pickled data will be saved.
+    Returns:
+    A pickle file with object saved in it
+    """
+    with open(filename, 'wb') as handle:
+        pickle.dump(retriever, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def load_pickle_file(filename: str):
+    """
+    De-Serialize file using Pickle.
+    Args:
+        filename (str): The name of the file where the pickled data will be saved.
+    Returns:
+    Pickle Object
+    """
+    with open(filename, "rb") as input_file:
+        pickle_object = pickle.load(input_file)
+    return pickle_object
+
+
+def load_DI_output(di_results_filename: str):
+    """
+    Loads the DI output pickle file.
+    """
+    DI_OUTPUT_DIR = os.path.join(os.getcwd(), "DI_output")
+    filepath = os.path.join(DI_OUTPUT_DIR, di_results_filename)
+    with open(filepath, "rb") as f:
+        di_results = pickle.load(f)
+    return di_results
+
+
 def create_parent_docs(content, llm):
     # Initialize the MarkdownHeaderTextSplitter with custom headers
     parent_headers_to_split_on = [
@@ -32,7 +69,9 @@ def create_parent_docs(content, llm):
 
 
 def generate_final_parents(md_result, full_text_with_images, source_file_name, llm):
-    """Generate parent document chunks and metadata."""
+    """
+    Generate parent document chunks and metadata.
+    """
     parent_docs = create_parent_docs(md_result, full_text_with_images, llm)
 
     parent_docs = chunking_utils.assign_page_numbers_to_parent_docs(md_result, parent_docs)
@@ -41,10 +80,18 @@ def generate_final_parents(md_result, full_text_with_images, source_file_name, l
         chunking_utils.create_custom_metadata_for_all_sources(doc)
     
     parent_docs = chunking_utils.add_source_metadata(parent_docs, source_file_name)
+    
     final_parents = chunking_utils.append_custom_metadata(parent_docs)
+    
+    # Create doc ids for parent docs
+    doc_ids = [str(uuid.uuid4()) for _ in final_parents]
 
-    print(f"[INFO] Created {len(final_parents)} parent documents.")
-    return final_parents
+    # store final_parents & doc_ids in dictionary
+    parent_dict = {"doc_ids":doc_ids, "parent_docs":final_parents}
+
+    #save to pickle
+    dump_pickle_file(parent_dict, source_file_name+".pkl")
+    return final_parents, doc_ids
 
 
 
@@ -136,7 +183,7 @@ def create_chroma_vectordb(embeddings, vector_db_name, sub_docs, summary_docs, q
     vector_store.add_documents(question_docs)
     return
 
-def create_MVR(parent_docs, doc_ids, vectorstore, filter_expression):
+def create_MVR(parent_docs, doc_ids, vectorstore):
     """
     Create MultiVectorRetriever
     """
@@ -152,4 +199,74 @@ def create_MVR(parent_docs, doc_ids, vectorstore, filter_expression):
 
     )
     retriever.docstore.mset(list(zip(doc_ids, parent_docs)))
+    return retriever
+
+
+def create_retriever_pipeline(
+    di_results_filename: str,
+    source_file_name: str,
+    embeddings_model: Optional[OpenAIEmbeddings] = None,
+    llm_model: Optional[ChatOpenAI] = None,
+    vector_db_name: str,
+    vectorstore_exists=False
+):
+    """
+    Full pipeline to create and return a MultiVectorRetriever.
+    Steps:
+    1. Load DI output
+    2. Generate parent docs (via generate_final_parents)
+    3. Load parent docs & doc_ids from pickle
+    4. Generate child docs, summaries, and hypothetical questions
+    5. Create Chroma vector DB
+    6. Create MultiVectorRetriever
+    """
+    persist_dir = os.path.join(os.getcwd(), vector_db_name)
+
+    if not vectorstore_exists:
+      # --- Step 1: Load DI output ---
+      di_output = load_DI_output(di_results_filename)
+      md_result = di_output["md_result"]
+      md_result_with_images = di_output['result_with_image_descp']
+
+      # --- Step 2: Generate parent docs ---
+      parent_docs, doc_ids = generate_final_parents(
+          md_result=md_result,
+          full_text_with_images=md_result_with_images,
+          source_file_name=source_file_name,
+          llm=llm_model
+      )
+
+      # --- Step 3: Create child docs ---
+      sub_docs = create_child_documents(parent_docs, doc_ids, id_key="doc_id")
+
+      # --- Step 4: Generate summaries ---
+      summary_docs = generate_summaries(parent_docs, llm_model, id_key="doc_id", doc_ids=doc_ids)
+
+      # --- Step 5: Generate hypothetical questions ---
+      question_docs = generate_hypothetical_questions(parent_docs, id_key="doc_id", doc_ids=doc_ids)
+
+      # --- Step 6: Create Chroma DB ---
+      vector_store = Chroma(
+          collection_name="documents",
+          embedding_function=embeddings_model,
+          persist_directory=persist_dir
+      )
+      vector_store.add_documents(sub_docs)
+      vector_store.add_documents(summary_docs)
+      vector_store.add_documents(question_docs)
+    else:
+      # --- Step 7: Load Parent docs & Doc ids ---
+      parent_dict = load_pickle_file(source_file_name + ".pkl")
+      parent_docs = parent_dict["parent_docs"]
+      doc_ids = parent_dict["doc_ids"]
+
+      # --- Step 8: Define exsiting vectorstore ---
+      vector_store = Chroma(collection_name="documents",
+      embedding_function=embeddings_model,
+      persist_directory=persist_dir
+      )
+
+    # --- Step 9: Create MultiVectorRetriever ---
+    retriever = create_MVR(parent_docs, doc_ids, vector_store)
+
     return retriever
