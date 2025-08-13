@@ -1,11 +1,12 @@
 import os
+import uuid
 import pickle
-from typing import List, Any
+from typing import List, Any, Optional
 from langchain_text_splitters import MarkdownHeaderTextSplitter
 from langchain_core.documents import Document
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from pydantic import BaseModel, Field
 from langchain_chroma import Chroma
 from langchain.retrievers.multi_vector import MultiVectorRetriever
@@ -72,7 +73,7 @@ def generate_final_parents(md_result, full_text_with_images, source_file_name, l
     """
     Generate parent document chunks and metadata.
     """
-    parent_docs = create_parent_docs(md_result, full_text_with_images, llm)
+    parent_docs = create_parent_docs(full_text_with_images, llm)
 
     parent_docs = chunking_utils.assign_page_numbers_to_parent_docs(md_result, parent_docs)
 
@@ -146,7 +147,7 @@ class HypotheticalQuestions(BaseModel):
     questions: List[str] = Field(..., description="List of questions")
 
 
-def generate_hypothetical_questions(parent_docs: List[Document], id_key: str, doc_ids: List[str]) -> List[Document]:
+def generate_hypothetical_questions(parent_docs: List[Document], llm: ChatOpenAI, id_key: str, doc_ids: List[str]) -> List[Document]:
     """
     Generates hypothetical questions for each document and returns them as Document objects.
     """
@@ -155,7 +156,7 @@ def generate_hypothetical_questions(parent_docs: List[Document], id_key: str, do
         | ChatPromptTemplate.from_template(
             "Generate a list of exactly 3 hypothetical questions that the below document could be used to answer:\n\n{doc}"
         )
-        | ChatOpenAI(max_retries=0, model="gpt-4o").with_structured_output(HypotheticalQuestions)
+        | llm.with_structured_output(HypotheticalQuestions)
         | (lambda x: x.questions)
     )
 
@@ -205,9 +206,9 @@ def create_MVR(parent_docs, doc_ids, vectorstore):
 def create_retriever_pipeline(
     di_results_filename: str,
     source_file_name: str,
+    vector_db_name: str,
     embeddings_model: Optional[OpenAIEmbeddings] = None,
     llm_model: Optional[ChatOpenAI] = None,
-    vector_db_name: str,
     vectorstore_exists=False
 ):
     """
@@ -243,7 +244,7 @@ def create_retriever_pipeline(
       summary_docs = generate_summaries(parent_docs, llm_model, id_key="doc_id", doc_ids=doc_ids)
 
       # --- Step 5: Generate hypothetical questions ---
-      question_docs = generate_hypothetical_questions(parent_docs, id_key="doc_id", doc_ids=doc_ids)
+      question_docs = generate_hypothetical_questions(parent_docs, llm_model, id_key="doc_id", doc_ids=doc_ids)
 
       # --- Step 6: Create Chroma DB ---
       vector_store = Chroma(
