@@ -16,3 +16,4 @@ langgraph==0.6.4
 langgraph-checkpoint-sqlite==2.0.11
 simple-colors==0.1.5
 langchain_chroma==0.2.5
+rank_bm25==0.2.2
