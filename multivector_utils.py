@@ -9,6 +9,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from pydantic import BaseModel, Field
 from langchain_chroma import Chroma
+from langchain_community.retrievers import BM25Retriever
+from langchain.retrievers import EnsembleRetriever
 from langchain.retrievers.multi_vector import MultiVectorRetriever
 from langchain.storage import InMemoryByteStore
 import chunking_utils
@@ -203,6 +205,15 @@ def create_MVR(parent_docs, doc_ids, vectorstore):
     return retriever
 
 
+def create_ensemble_retriever_with_bm25(parent_docs, mvr_retriever):
+    bm25_retriever = BM25Retriever.from_documents(parent_docs)
+    # initialize the ensemble retriever
+    ensemble_retriever = EnsembleRetriever(
+        retrievers=[bm25_retriever, mvr_retriever], weights=[0.5, 0.5]
+    )
+    return ensemble_retriever
+
+
 def create_retriever_pipeline(
     di_results_filename: str,
     source_file_name: str,
@@ -257,7 +268,7 @@ def create_retriever_pipeline(
       vector_store.add_documents(question_docs)
     else:
       # --- Step 7: Load Parent docs & Doc ids ---
-      parent_dict = load_pickle_file(source_file_name + ".pkl")
+      parent_dict = load_pickle_file(os.getcwd() + "/parent_pickles/" + source_file_name + "_parents.pkl")
       parent_docs = parent_dict["parent_docs"]
       doc_ids = parent_dict["doc_ids"]
 
@@ -268,6 +279,9 @@ def create_retriever_pipeline(
       )
 
     # --- Step 9: Create MultiVectorRetriever ---
-    retriever = create_MVR(parent_docs, doc_ids, vector_store)
+    mvr_retriever = create_MVR(parent_docs, doc_ids, vector_store)
 
-    return retriever
+    # ---Step 10: Create EnsembleRetriever ---
+    ensemble_retriever = create_ensemble_retriever_with_bm25(parent_docs, mvr_retriever)
+
+    return ensemble_retriever
