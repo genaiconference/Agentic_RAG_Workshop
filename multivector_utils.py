@@ -93,7 +93,7 @@ def generate_final_parents(md_result, full_text_with_images, source_file_name, l
     parent_dict = {"doc_ids":doc_ids, "parent_docs":final_parents}
 
     #save to pickle
-    dump_pickle_file(parent_dict, source_file_name+".pkl")
+    dump_pickle_file(parent_dict, os.getcwd() + "/parent_pickles/" + source_file_name+".pkl")
     return final_parents, doc_ids
 
 
