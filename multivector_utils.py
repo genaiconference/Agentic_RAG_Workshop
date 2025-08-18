@@ -25,6 +25,7 @@ def dump_pickle_file(retriever, filename: str):
     Returns:
     A pickle file with object saved in it
     """
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
     with open(filename, 'wb') as handle:
         pickle.dump(retriever, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
@@ -93,7 +94,7 @@ def generate_final_parents(md_result, full_text_with_images, source_file_name, l
     parent_dict = {"doc_ids":doc_ids, "parent_docs":final_parents}
 
     #save to pickle
-    dump_pickle_file(parent_dict, source_file_name+".pkl")
+    dump_pickle_file(parent_dict, os.getcwd() + "/parent_pickles/" + source_file_name + "_parents.pkl")
     return final_parents, doc_ids
 
 
