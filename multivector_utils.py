@@ -25,6 +25,7 @@ def dump_pickle_file(retriever, filename: str):
     Returns:
     A pickle file with object saved in it
     """
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
     with open(filename, 'wb') as handle:
         pickle.dump(retriever, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
