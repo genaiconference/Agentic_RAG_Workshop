@@ -17,4 +17,11 @@ langgraph-checkpoint-sqlite==2.0.11
 simple-colors==0.1.5
 langchain_chroma==0.2.5
 rank_bm25==0.2.2
-langfuse==3.2.4
+openai==1.99.9
+langchain_core==0.3.72
+langchain_openai==0.3.28
+neo4j==5.28.2
+neo4j-graphrag==1.9.1
+neo4j-graphrag[fuzzy-matching]
+openpyxl==3.1.5
+langfuse==3.2.5
